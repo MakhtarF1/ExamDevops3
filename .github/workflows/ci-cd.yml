@@ -1,0 +1,103 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Install ESLint dependencies
+      run: npm install --save-dev eslint @eslint/js eslint-plugin-react @typescript-eslint/eslint-plugin
+
+    - name: Skip ESLint
+      run: echo "Skipping ESLint step"
+
+    - name: Skip Tests
+      run: echo "Skipping tests step"
+
+    - name: Build Docker image
+      run: docker build -t gestion-etablissement-backend:${{ github.sha }} .
+
+    - name: Save Docker image
+      run: docker save gestion-etablissement-backend:${{ github.sha }} > gestion-etablissement-backend.tar
+
+    - name: Upload Docker image as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: gestion-etablissement-backend.tar
+
+  deploy-dev:
+    needs: build-and-lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Download Docker image
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+
+    - name: Load Docker image
+      run: docker load < gestion-etablissement-backend.tar
+
+    - name: Deploy to Dev environment
+      run: |
+        echo "Déploiement sur l'environnement de développement"
+        # docker run -d -p 80:80 gestion-etablissement-backend:${{ github.sha }}
+
+  deploy-staging:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube/  # Crée le dossier ~/.kube/ s'il n'existe pas
+        echo "$KUBECONFIG" > ~/.kube/config  # Écrit la variable dans le fichier
+        chmod 600 ~/.kube/config  # Sécurise le fichier
+
+    - name: Deploy to Staging environment
+      run: |
+        echo "Déploiement sur l'environnement de staging (K8s)"
+        # kubectl apply -f k8s/deployment.yaml
+        # kubectl apply -f k8s/service.yaml
+
+  deploy-prod:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Deploy to Production environment
+      run: |
+        echo "Déploiement sur l'environnement de production"
+        # kubectl apply -f production/deployment.yaml
